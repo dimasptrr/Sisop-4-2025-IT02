@@ -709,6 +709,95 @@ int main(int argc, char *argv[]) {
     - Memanggil `fuse_main` untuk menjalankan filesystem FUSE dengan operasi yang sudah didefinisikan di baymax_oper.
     - Menerima argumen command line `argc` dan `argv` untuk pengaturan mount point dan opsi lainnya.
 
+# Soal Ketiga
+## fuse_antink
+```c
+    static void log_access(const char *operation, const char *path)
+
+    FILE *log = fopen(log_path, "a");  // buka file log (append mode)
+fprintf(log, "%s: %s\n", operation, path);  // tulis log
+fclose(log);
+
+```
+Fungsi ini mencatat operasi file (OPEN, READ, dll.) ke file log.
+Penting: Di sinilah logger melihat aktivitas file.
+
+```c
+    static int antink_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi)
+
+    snprintf(fullpath, sizeof(fullpath), "%s%s", real_root, path); // gabungkan path
+int res = lstat(fullpath, stbuf);  // ambil info file asli
+
+```
+Digunakan oleh FUSE untuk mengambil metadata file (ukuran, waktu modifikasi, dll.)
+Ini harus ada supaya sistem file FUSE bisa "melihat" struktur file asli.
+
+```c
+    static int antink_open(const char *path, struct fuse_file_info *fi)
+
+    int fd = open(fullpath, fi->flags);  // buka file asli
+log_access("OPEN", path);            // log aktivitas
+
+```
+Fungsi ini menangani aksi ketika user membuka file (misalnya cat).
+Ini juga log aktivitas ke file log!
+
+```c
+    static int antink_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
+
+int fd = open(fullpath, O_RDONLY);  // buka file asli
+lseek(fd, offset, SEEK_SET);        // loncat ke offset tertentu
+int res = read(fd, buf, size);      // baca data
+log_access("READ", path);           // log aktivitas
+
+```
+Fungsi ini menangani membaca isi file.
+Di sinilah kita bisa deteksi baca file mencurigakan (misalnya nama file mengandung "rahasia").
+
+```c
+    static int antink_readdir(...)
+
+    DIR *dp = opendir(fullpath);     // buka direktori asli
+while ((de = readdir(dp)) != NULL) {
+    filler(buf, de->d_name, NULL, 0, 0);  // masukkan tiap nama file ke output
+}
+
+```
+Fungsi ini digunakan oleh FUSE untuk membaca isi direktori (misal saat ls).
+Wajib untuk bisa melihat file di dalam mount point.
+
+```c
+int main(int argc, char *argv[]) {
+    return fuse_main(argc, argv, &antink_oper, NULL);
+}
+```
+Fungsi utama — memulai FUSE dan mendaftarkan operasi yang kita definisikan (getattr, read, dll).
+
+## logger
+```c
+    FILE *file = fopen(LOG_FILE, "r");
+fseek(file, 0, SEEK_END);  // lompat ke akhir file
+
+while (1) {
+    if (fgets(line, sizeof(line), file)) {
+        printf("[AntiNK-LOG] %s", line);  // tampilkan log baru
+    } else {
+        usleep(500000);  // tunggu 0.5 detik jika belum ada baris baru
+    }
+}
+
+```
+Ini baca terus menerus isi file log, cocok untuk ditaruh di container logging real-time.
+
+```c
+    if (strstr(path, "rahasia") || strstr(path, "nafis") || strstr(path, "kimcun")) {
+    log_access("ALERT", path);
+}
+
+```
+Saat ini sistem ini mendeteksi aktivitas file. Untuk meningkatkan deteksi "kenakalan" Nafis & Kimcun, kamu bisa
+Deteksi jumlah akses berulang bisa ditambahkan di masa depan (misal pakai cache atau count).
+
 # Soal Keempat
 ## Persiapan Umum
 ```bash
